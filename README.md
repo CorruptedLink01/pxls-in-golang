@@ -23,11 +23,12 @@ With some hope (and luck), this might eventually become the live version of the 
 	- [x] /info endpoint
 	- [x] /boarddata endpoint
 	- [x] /whoami endpoint
+	- [ ] Oauth endpoints
 	- [ ] other endpoints...
 - [ ] Websocket
 	- [x] send userinfo message
 		- [x] IP-based
-		- [ ] User-based
+		- [x] Token-based
 	- [x] handle pixel placing
 	- [x] handle pixel stacking
 	- [ ] other message types...

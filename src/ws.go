@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"time"
 
@@ -36,7 +37,8 @@ var wsUpgrader = websocket.Upgrader{
 	WriteBufferSize: MaxWebsocketSendBufferSize,
 }
 
-var activeConnections = make(map[string]*wsConn)
+// Connections is an array of all active websocket connections.
+var Connections = make(map[string]*wsConn)
 
 func upgradeSocket(w http.ResponseWriter, r *http.Request) (*wsConn, error) {
 	conn, err := wsUpgrader.Upgrade(w, r, nil)
@@ -44,9 +46,37 @@ func upgradeSocket(w http.ResponseWriter, r *http.Request) (*wsConn, error) {
 		return nil, err
 	}
 
+	var confAuthUseIP = App.conf.GetBoolean("oauth.useIp")
+	pxlsTokenCookie, err := r.Cookie("pxls-token")
+
+	var user *User
+	for _, u := range App.users {
+		// match IP if connected confAuthUseIP or match token otherwise
+		var match bool
+		if confAuthUseIP {
+			host, _, err := net.SplitHostPort(conn.RemoteAddr().String())
+			if err != nil {
+				conn.Close()
+				return nil, fmt.Errorf("User sent invalid address %s", conn.RemoteAddr())
+			}
+			match = u.Auth.IP == host
+		} else if pxlsTokenCookie != nil {
+			match = u.Auth.Token == pxlsTokenCookie.Value
+		}
+
+		if match {
+			user = &u
+			break
+		}
+	}
+	if user == nil && confAuthUseIP {
+		user = MakeUserFromIP(uint(len(App.users)), conn.LocalAddr().String())
+		App.users = append(App.users, *user)
+	}
+
 	return &wsConn{
 		conn,
-		MakeUserFromIP(0, conn.RemoteAddr().String()),
+		user,
 		make(chan interface{}),
 	}, nil
 }
@@ -60,27 +90,30 @@ func HandleWebsocketPath(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	activeConnections[conn.RemoteAddr().String()] = conn
+	Connections[conn.RemoteAddr().String()] = conn
 	go func() {
 		for {
 			conn.WriteJSON(<-conn.sendQueue)
 		}
 	}()
 
-	// Note(netux): Needed so the max stacked on the client updates
-	sendPixelsAvailable(conn, "auth")
-	sendUserInfo(conn)
-	if conn.pxlsUser.PixelStacker.Stack > 0 {
-		sendPixelsAvailable(conn, "connected")
-	}
-
-	conn.pxlsUser.PixelStacker.StartTimer()
-	if conn.pxlsUser.PixelStacker.Stack == 0 {
-		sendCooldown(conn, conn.pxlsUser.PixelStacker.GetCooldown())
+	if conn.pxlsUser != nil {
+		// Note(netux): Needed so the max stacked on the client updates
+		sendPixelsAvailable(conn, "auth")
+		sendUserInfo(conn)
+		if conn.pxlsUser.PixelStacker.Stack > 0 {
+			sendPixelsAvailable(conn, "connected")
+		}
+		conn.pxlsUser.PixelStacker.StartTimer()
+		if conn.pxlsUser.PixelStacker.Stack == 0 {
+			sendCooldown(conn, conn.pxlsUser.PixelStacker.GetCooldown())
+		}
 	}
 
 	go handleIncomingMessages(conn)
-	go handleUserEvents(conn)
+	if conn.pxlsUser != nil {
+		go handleUserEvents(conn)
+	}
 }
 
 func handleUserEvents(conn *wsConn) {
@@ -96,7 +129,7 @@ func handleUserEvents(conn *wsConn) {
 
 func handleIncomingMessages(conn *wsConn) {
 	defer func() {
-		delete(activeConnections, conn.RemoteAddr().String())
+		delete(Connections, conn.RemoteAddr().String())
 		conn.Close()
 	}()
 
@@ -121,9 +154,14 @@ func handleIncomingMessages(conn *wsConn) {
 
 		switch msgType {
 		case wsPixelType:
+			if conn.pxlsUser == nil {
+				break
+			}
+
 			var pixelMsg wsPixelReq
 			if err := json.Unmarshal(rawMsg, &pixelMsg); err != nil {
 				fmt.Printf("Websocket JSON Pixel parsing error: %s\n", err)
+				break
 			}
 			handlePixel(conn, pixelMsg)
 		default:
@@ -262,7 +300,7 @@ func handlePixel(conn *wsConn, pixelMsg wsPixelReq) {
 		},
 		[]wsPixel{pixelMsg.wsPixel},
 	}
-	for _, conn := range activeConnections {
+	for _, conn := range Connections {
 		conn.queue(pixelsMsg)
 	}
 }
