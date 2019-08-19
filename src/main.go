@@ -9,7 +9,7 @@ import (
 
 const (
 	// MaxUserAmount is the maximum amount of concurrent users supported by the server
-	MaxUserAmount = 1024
+	MaxUserAmount = 512
 
 	// TODO(netux): lower these values
 
@@ -48,8 +48,11 @@ func makePaletteFromConf(conf *configuration.Config) (Palette, error) {
 var App PxlsApp
 
 func main() {
-	// TODO(netux): open file manually to handle file not found errors
-	var conf = configuration.LoadConfig("pxls.conf")
+	conf, err := ReadConfig()
+	if err != nil {
+		fmt.Printf("Reading config err: %s\n", err)
+		return
+	}
 
 	palette, err := makePaletteFromConf(conf)
 	if err != nil {
@@ -62,7 +65,7 @@ func main() {
 		return
 	}
 
-	var users = make([]User, 0, 1024)
+	var users = make([]User, 0, MaxUserAmount)
 
 	App = PxlsApp{*conf, *canvas, palette, users}
 
