@@ -8,6 +8,12 @@ I'm fairly new to Rust and had learned Golang a few months ago, so prefered tryi
 
 With some hope (and luck), this might eventually become the live version of the game.
 
+## Development
+1. Install [Golang 1.12.9](https://golang.org/) or later
+2. Clone `reference.pxls.conf`, rename it to `pxls.conf` and configure to your liking
+3. Run `go run src/*`
+4. Go to [https://localhost:4567](https://localhost:4567) (or whatever port you configured in `pxls.conf`)
+
 
 ## Implemented
 - [x] Load pxls.conf
