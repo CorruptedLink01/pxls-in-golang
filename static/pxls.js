@@ -17,13 +17,13 @@ window.App = (function () {
                 }
             }
         },
-            setCookie = function (c_name, value, exdays) {
-                var exdate = new Date(),
-                    c_value = escape(value);
-                exdate.setDate(exdate.getDate() + exdays);
-                c_value += ((exdays === null) ? '' : '; expires=' + exdate.toUTCString());
-                document.cookie = c_name + '=' + c_value;
-            };
+        setCookie = function (c_name, value, exdays) {
+            var exdate = new Date(),
+                c_value = escape(value);
+            exdate.setDate(exdate.getDate() + exdays);
+            c_value += ((exdays === null) ? '' : '; expires=' + exdate.toUTCString());
+            document.cookie = c_name + '=' + c_value;
+        };
         return {
             haveSupport: null,
             support: function () {
