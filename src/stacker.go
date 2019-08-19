@@ -9,30 +9,44 @@ import (
 // - if it sends `true`, the Stack gained a pixel
 // - if it sends `false`, the Stack was consumed
 type PixelStacker struct {
-	timer *time.Timer
-	stop  chan bool
-	Stack uint
-	C     chan bool
+	timer   *time.Timer
+	stopped bool
+	stopC   chan bool
+	Stack   uint
+	C       chan bool
+}
+
+func (ps *PixelStacker) resetTimer() {
+	cd := ps.GetCooldown()
+	if ps.timer == nil {
+		ps.timer = time.NewTimer(cd)
+	} else {
+		ps.timer.Reset(cd)
+	}
+	ps.stopped = false
+}
+
+func (ps *PixelStacker) stop() {
+	ps.timer.Stop()
+	ps.stopped = true
 }
 
 func (ps *PixelStacker) run() {
 	var max = uint(App.conf.GetInt32("stacking.maxStacked"))
+	ps.resetTimer()
 
-	// TODO(netux): check if calling ps.timer.Reset() is more efficient
-	ps.timer = time.NewTimer(ps.GetCooldown())
-
-	select {
-	case <-ps.timer.C:
-		// Note(netux): > instead of == is intentional
-		if ps.Stack > max {
+	// Note(netux): <= instead of < is intentional
+	for ps.Stack <= max && !ps.stopped {
+		select {
+		case <-ps.timer.C:
+			ps.Gain()
+			ps.resetTimer()
+		case <-ps.stopC:
+			ps.stop()
 			return
 		}
-
-		ps.Gain()
-		ps.run()
-	case <-ps.stop:
-		return
 	}
+	ps.stop()
 }
 
 // GetCooldown returns the user's cooldown in between receiving
@@ -46,23 +60,17 @@ func (ps *PixelStacker) GetCooldown() time.Duration {
 
 // StartTimer starts the PixelStacker
 func (ps *PixelStacker) StartTimer() {
-	// TODO(netux): this feels hacky
-	if ps.timer != nil {
-		ps.timer.Stop()
-		go func() {
-			for <-ps.stop {
-				// drain ps.stop
-			}
-		}()
+	if !ps.stopped {
+		ps.stopC <- true
 	}
 	go ps.run()
 }
 
 // StopTimer stops the PixelStacker
 func (ps *PixelStacker) StopTimer() {
-	go func() {
-		ps.stop <- true
-	}()
+	if !ps.stopped {
+		ps.stopC <- true
+	}
 }
 
 // Gain increases the stack and notifies that through the channel C.
@@ -83,9 +91,12 @@ func (ps *PixelStacker) Consume() {
 
 // MakePixelStacker creates a new, clean, PixelStacker
 func MakePixelStacker() *PixelStacker {
-	return &PixelStacker{
-		timer: nil,
-		stop:  make(chan bool, 1),
-		C:     make(chan bool, 1),
+	ps := PixelStacker{
+		timer:   nil,
+		stopped: true,
+		stopC:   make(chan bool, 1),
+		C:       make(chan bool, 1),
 	}
+
+	return &ps
 }
