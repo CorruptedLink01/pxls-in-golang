@@ -36,23 +36,19 @@ func intToHex(cs []int) []string {
 	return res
 }
 
-// TODO(netux): replace Printf's of errors with a system to actually handle them
+// TODO(netux): replace fmt with a logger
 
 // StartServer sets up endpoint handlers and listens and serves
 func StartServer() {
-	// var users = make(map[string]User)
-
-	// TODO(netux): move http.HandleFunc calls into their own files
-
 	// handle /info
 	http.HandleFunc("/info", func(w http.ResponseWriter, r *http.Request) {
-		// TODO(netux): use real values
 		info := apiInfo{
-			CanvasCode:       App.conf.GetString("canvascode"),
-			Width:            App.canvas.Width,
-			Height:           App.canvas.Height,
-			Palette:          intToHex(App.palette),
-			MaxStackedPixels: uint(App.conf.GetInt32("stacking.maxStacked")),
+			CanvasCode:       App.Conf.GetString("canvascode"),
+			Width:            App.Canvas.Width,
+			Height:           App.Canvas.Height,
+			Palette:          intToHex(App.Palette),
+			MaxStackedPixels: uint(App.Conf.GetInt32("stacking.maxStacked")),
+			// TODO(netux): return actually supported auth services
 			AuthServices: map[string]apiAuthServices{
 				"discord": apiAuthServices{
 					ID:   "discord",
@@ -68,7 +64,7 @@ func StartServer() {
 
 	// handle /boarddata
 	http.HandleFunc("/boarddata", func(w http.ResponseWriter, r *http.Request) {
-		w.Write(App.canvas.Board)
+		w.Write(App.Canvas.Board)
 	})
 
 	// handle /whoami
@@ -84,6 +80,6 @@ func StartServer() {
 	fs := http.FileServer(http.Dir("static"))
 	http.Handle("/", fs)
 
-	port := App.conf.GetString("server.port")
+	port := App.Conf.GetString("server.port")
 	http.ListenAndServe(":"+port, nil)
 }

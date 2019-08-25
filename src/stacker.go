@@ -32,7 +32,7 @@ func (ps *PixelStacker) stop() {
 }
 
 func (ps *PixelStacker) run() {
-	var max = uint(App.conf.GetInt32("stacking.maxStacked"))
+	var max = uint(App.Conf.GetInt32("stacking.maxStacked"))
 	ps.resetTimer()
 
 	// Note(netux): <= instead of < is intentional
@@ -54,7 +54,7 @@ func (ps *PixelStacker) run() {
 // available already, and a multiplicative factor.
 func (ps *PixelStacker) GetCooldown() time.Duration {
 	// TODO(netux): check if the second stacked pixel has twice the factor
-	var factor = float32(App.conf.GetFloat32("stacking.cooldownMultiplier"))
+	var factor = float32(App.Conf.GetFloat32("stacking.cooldownMultiplier"))
 	return time.Duration(float32(ps.Stack+1)*factor) * App.GetCooldown()
 }
 
@@ -75,7 +75,7 @@ func (ps *PixelStacker) StopTimer() {
 
 // Gain increases the stack and notifies that through the channel C.
 func (ps *PixelStacker) Gain() {
-	if ps.Stack <= uint(App.conf.GetInt32("stacking.maxStacked")) {
+	if ps.Stack <= uint(App.Conf.GetInt32("stacking.maxStacked")) {
 		ps.Stack++
 		ps.C <- true
 	}

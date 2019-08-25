@@ -39,16 +39,17 @@ func (c *Canvas) SetPixelColor(x, y uint, colorIdx byte) {
 
 // PxlsApp stores information about the game application.
 type PxlsApp struct {
-	conf    configuration.Config
-	canvas  Canvas
-	palette Palette
-	users   []User
+	Conf    configuration.Config
+	DB      Database
+	Canvas  Canvas
+	Palette Palette
+	Users   UserList
 }
 
 // GetCooldown returns the time in between placing pixels
 // players have to wait until they can place again.
 func (a *PxlsApp) GetCooldown() time.Duration {
-	var cooldown = a.conf.GetTimeDurationInfiniteNotAllowed("cooldown")
+	var cooldown = a.Conf.GetTimeDurationInfiniteNotAllowed("cooldown")
 	// TODO(netux): apply math function used in Pxls' sourcecode
 	return cooldown
 }

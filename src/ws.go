@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -15,7 +16,7 @@ import (
 
 type wsConn struct {
 	*websocket.Conn
-	pxlsUser  *User
+	user      *User
 	sendQueue chan interface{}
 }
 
@@ -40,38 +41,106 @@ var wsUpgrader = websocket.Upgrader{
 // Connections is an array of all active websocket connections.
 var Connections = make(map[string]*wsConn)
 
+func getReqIP(r *http.Request) (string, error) {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	return host, err
+}
+
+func getReqPxlsToken(r *http.Request) (string, error) {
+	pxlsTokenCookie, err := r.Cookie("pxls-token")
+	if err != nil {
+		if err != http.ErrNoCookie {
+			return "", fmt.Errorf("cannot get token from request: %v", err)
+		}
+		return "", &NotFoundError{"pxls token cookie not found"}
+	}
+
+	return pxlsTokenCookie.Value, nil
+}
+
+func newUserByIP(ip, ua string) (*User, error) {
+	dbUser, err := App.DB.CreateUser("-snip-", UserLogin{"ip", ip}, ip, ua)
+	if err != nil {
+		return nil, fmt.Errorf("cannot create user in database with IP %s: %v", ip, err)
+	}
+
+	u, err := App.Users.MakeAndAdd(dbUser, ip)
+	return u, err
+}
+
+func getReqUser(r *http.Request) (u *User, err error) {
+	ua := r.UserAgent()
+
+	ip, err := getReqIP(r)
+	if err != nil {
+		return nil, fmt.Errorf("cannot get host part of IP address \"%s\": %v", r.RemoteAddr, err)
+	}
+
+	token, err := getReqPxlsToken(r)
+	if err != nil && !IsNotFoundError(err) {
+		return nil, err
+	}
+
+	/// Get user by IP:
+	if App.Conf.GetBoolean("oauth.useIp") && token == "" {
+		u, ok := App.Users.GetByTokenOrIP(ip)
+		if ok {
+			// found user in cache.
+			return u, nil
+		}
+
+		dbUser, err := App.DB.GetUserByLogin(UserLogin{"ip", ip})
+		if err != nil {
+			if !IsNotFoundError(err) {
+				return nil, err
+			}
+
+			u, err := newUserByIP(ip, ua)
+			return u, err
+		}
+
+		u, err = App.Users.MakeAndAdd(dbUser, ip)
+		if err != nil {
+			return nil, err
+		}
+
+		return u, nil
+	}
+
+	/// Get user by token:
+	if token == "" {
+		// no token => no user
+		return nil, nil
+	}
+
+	u, ok := App.Users.GetByTokenOrIP(token)
+	if ok {
+		// found user in cache.
+		return u, nil
+	}
+
+	dbUser, err := App.DB.GetUserByToken(token)
+	if err != nil {
+		return nil, fmt.Errorf("cannot fetch user with IP %s auth data from database: %v", ip, err)
+	}
+
+	u, err = App.Users.MakeAndAdd(dbUser, token)
+	if err != nil {
+		return nil, fmt.Errorf("cannot make and add user to user list: %v", err)
+	}
+
+	return u, nil
+}
+
 func upgradeSocket(w http.ResponseWriter, r *http.Request) (*wsConn, error) {
 	conn, err := wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	var confAuthUseIP = App.conf.GetBoolean("oauth.useIp")
-	pxlsTokenCookie, err := r.Cookie("pxls-token")
-
-	var user *User
-	for _, u := range App.users {
-		// match IP if connected confAuthUseIP or match token otherwise
-		var match bool
-		if confAuthUseIP {
-			host, _, err := net.SplitHostPort(conn.RemoteAddr().String())
-			if err != nil {
-				conn.Close()
-				return nil, fmt.Errorf("User sent invalid address %s", conn.RemoteAddr())
-			}
-			match = u.Auth.IP == host
-		} else if pxlsTokenCookie != nil {
-			match = u.Auth.Token == pxlsTokenCookie.Value
-		}
-
-		if match {
-			user = &u
-			break
-		}
-	}
-	if user == nil && confAuthUseIP {
-		user = MakeUserFromIP(uint(len(App.users)), conn.LocalAddr().String())
-		App.users = append(App.users, *user)
+	user, err := getReqUser(r)
+	if err != nil {
+		return nil, err
 	}
 
 	return &wsConn{
@@ -86,39 +155,45 @@ func upgradeSocket(w http.ResponseWriter, r *http.Request) (*wsConn, error) {
 func HandleWebsocketPath(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgradeSocket(w, r)
 	if err != nil {
-		fmt.Printf("Websocket upgrade err: %s\n", err)
+		fmt.Fprintf(os.Stderr, "websocket upgrade err: %v\n", err)
 		return
 	}
 
-	Connections[conn.RemoteAddr().String()] = conn
+	ip, err := getReqIP(r)
+	if err != nil {
+		return
+	}
+
+	Connections[ip] = conn
 	go func() {
 		for {
-			conn.WriteJSON(<-conn.sendQueue)
+			m := <-conn.sendQueue
+			conn.WriteJSON(m)
 		}
 	}()
 
-	if conn.pxlsUser != nil {
+	if conn.user != nil {
 		// Note(netux): Needed so the max stacked on the client updates
 		sendPixelsAvailable(conn, "auth")
 		sendUserInfo(conn)
-		if conn.pxlsUser.PixelStacker.Stack > 0 {
+		if conn.user.PixelStacker.Stack > 0 {
 			sendPixelsAvailable(conn, "connected")
 		}
-		conn.pxlsUser.PixelStacker.StartTimer()
-		if conn.pxlsUser.PixelStacker.Stack == 0 {
-			sendCooldown(conn, conn.pxlsUser.PixelStacker.GetCooldown())
+		conn.user.PixelStacker.StartTimer()
+		if conn.user.PixelStacker.Stack == 0 {
+			sendCooldown(conn, conn.user.PixelStacker.GetCooldown())
 		}
 	}
 
 	go handleIncomingMessages(conn)
-	if conn.pxlsUser != nil {
+	if conn.user != nil {
 		go handleUserEvents(conn)
 	}
 }
 
 func handleUserEvents(conn *wsConn) {
 	for {
-		isGain := <-conn.pxlsUser.PixelStacker.C
+		isGain := <-conn.user.PixelStacker.C
 		cause := "consume"
 		if isGain {
 			cause = "stackGain"
@@ -139,14 +214,14 @@ func handleIncomingMessages(conn *wsConn) {
 			if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure, websocket.CloseNoStatusReceived) {
 				return
 			}
-			fmt.Printf("Conn reading err: %s\n", err)
+			fmt.Fprintf(os.Stderr, "conn reading err: %v\n", err)
 			continue
 		}
 		var msgType wsMessageType
 		{
 			var wsMsg wsMessage
 			if err := json.Unmarshal(rawMsg, &wsMsg); err != nil {
-				fmt.Printf("Websocket JSON parsing error: %s\n", err)
+				fmt.Fprintf(os.Stderr, "websocket JSON parsing error: %v\n", err)
 				return
 			}
 			msgType = wsMsg.Type
@@ -154,18 +229,18 @@ func handleIncomingMessages(conn *wsConn) {
 
 		switch msgType {
 		case wsPixelType:
-			if conn.pxlsUser == nil {
+			if conn.user == nil {
 				break
 			}
 
 			var pixelMsg wsPixelReq
 			if err := json.Unmarshal(rawMsg, &pixelMsg); err != nil {
-				fmt.Printf("Websocket JSON Pixel parsing error: %s\n", err)
+				fmt.Fprintf(os.Stderr, "websocket JSON Pixel parsing error: %v\n", err)
 				break
 			}
 			handlePixel(conn, pixelMsg)
 		default:
-			fmt.Printf("Unhandled websocket msgType %s: %s\n", msgType, string(rawMsg))
+			fmt.Fprintf(os.Stderr, "unhandled websocket msgType %s: %v\n", msgType, string(rawMsg))
 		}
 	}
 }
@@ -190,12 +265,11 @@ type wsUserInfo struct {
 
 // sendUserInfo sends an "userinfo" message through the websocket connection conn
 func sendUserInfo(conn *wsConn) {
-	// TODO(netux): support non-ip method
 	conn.queue(wsUserInfo{
 		wsMessage:  withType(wsUserInfoType),
-		AuthMethod: conn.pxlsUser.Auth.Method,
-		Role:       conn.pxlsUser.Role,
-		Username:   conn.pxlsUser.Name,
+		AuthMethod: conn.user.Login.Method,
+		Role:       conn.user.Role,
+		Username:   conn.user.Name,
 	})
 }
 
@@ -221,7 +295,7 @@ type wsPixelsAvailable struct {
 func sendPixelsAvailable(conn *wsConn, cause string) {
 	conn.queue(wsPixelsAvailable{
 		withType(wsPixelsAvailableType),
-		conn.pxlsUser.PixelStacker.Stack,
+		conn.user.PixelStacker.Stack,
 		cause,
 	})
 }
@@ -265,16 +339,16 @@ type wsAckForPixel struct {
 }
 
 func handlePixel(conn *wsConn, pixelMsg wsPixelReq) {
-	if conn.pxlsUser == nil {
+	if conn.user == nil {
 		return
 	}
 
-	var ps = conn.pxlsUser.PixelStacker
+	var ps = conn.user.PixelStacker
 	if ps.Stack == 0 {
 		return
 	}
 
-	if App.canvas.GetPixelColorIndex(pixelMsg.PosX, pixelMsg.PosY) == pixelMsg.ColorIdx {
+	if App.Canvas.GetPixelColorIndex(pixelMsg.PosX, pixelMsg.PosY) == pixelMsg.ColorIdx {
 		return
 	}
 
@@ -287,11 +361,18 @@ func handlePixel(conn *wsConn, pixelMsg wsPixelReq) {
 
 	ps.Consume()
 
-	App.canvas.SetPixelColor(pixelMsg.PosX, pixelMsg.PosY, pixelMsg.ColorIdx)
+	App.Canvas.SetPixelColor(pixelMsg.PosX, pixelMsg.PosY, pixelMsg.ColorIdx)
+	if err := App.DB.PlacePixel(pixelMsg.PosX, pixelMsg.PosY, pixelMsg.ColorIdx, conn.user); err != nil {
+		fmt.Fprintf(os.Stderr, "cannot place pixel at (%d, %d) by user with ID %d in database: %v", pixelMsg.PosX, pixelMsg.PosY, conn.user.ID, err)
+	}
 	ps.StartTimer()
 
-	if conn.pxlsUser.PixelStacker.Stack == 0 {
-		sendCooldown(conn, ps.GetCooldown())
+	if conn.user.PixelStacker.Stack == 0 {
+		cd := ps.GetCooldown()
+		if err := App.DB.SetUserCooldownExpiry(conn.user.ID, time.Now().Add(cd)); err != nil {
+			fmt.Fprintf(os.Stderr, "cannot set cooldown expiry for user with ID %d in database: %v", conn.user.ID, err)
+		}
+		sendCooldown(conn, cd)
 	}
 
 	pixelsMsg := wsPixelRes{

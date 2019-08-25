@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 
 	"github.com/go-akka/configuration"
@@ -50,24 +51,33 @@ var App PxlsApp
 func main() {
 	conf, err := ReadConfig()
 	if err != nil {
-		fmt.Printf("Reading config err: %s\n", err)
+		fmt.Fprintf(os.Stderr, "reading config err: %v\n", err)
+		return
+	}
+
+	db, err := MakeDatabase(
+		conf.GetString("database.driver"),
+		conf.GetString("database.user"),
+		conf.GetString("database.pass"),
+		conf.GetString("database.url"),
+	)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "initializing database err: %v\n", err)
 		return
 	}
 
 	palette, err := makePaletteFromConf(conf)
 	if err != nil {
-		fmt.Printf("Palette parsing from config err: %s\n", err)
+		fmt.Fprintf(os.Stderr, "palette parsing from config err: %v\n", err)
 		return
 	}
 	canvas, err := makeCanvasFromConf(conf)
 	if err != nil {
-		fmt.Printf("Canvas parsing from config err: %s\n", err)
+		fmt.Fprintf(os.Stderr, "canvas parsing from config err: %v\n", err)
 		return
 	}
 
-	var users = make([]User, 0, MaxUserAmount)
-
-	App = PxlsApp{*conf, *canvas, palette, users}
+	App = PxlsApp{*conf, *db, *canvas, palette, *MakeUserList()}
 
 	StartServer()
 }

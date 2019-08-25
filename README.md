@@ -38,8 +38,13 @@ With some hope (and luck), this might eventually become the live version of the 
 	- [x] handle pixel stacking
 	- [ ] other message types...
 - [ ] User roles
-- [ ] Database
+- [x] Database
+	- [x] users table
+	- [x] sessions table
+	- [-] pixels table
 - [ ] Console commands
+- [ ] Board backups
+- [ ] Logs
 
 
 ## Plans
