@@ -108,6 +108,11 @@ func (db *Database) SetUserCooldownExpiry(uid uint, ce time.Time) error {
 	return db.sql.Model(u).Update(u).Where("id = ?", uid).Error
 }
 
+// Close closes the internal connection to the database.
+func (db *Database) Close() error {
+	return db.sql.Close()
+}
+
 // MakeDatabase creates and connects to the database.
 func MakeDatabase(driver, user, pass, uri string) (*Database, error) {
 	// https://github.com/pxlsspace/Pxls/blob/master/src/main/java/space/pxls/data/Database.java#L49

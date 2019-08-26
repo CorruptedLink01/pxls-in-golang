@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"time"
 )
 
@@ -9,44 +10,24 @@ import (
 // - if it sends `true`, the Stack gained a pixel
 // - if it sends `false`, the Stack was consumed
 type PixelStacker struct {
-	timer   *time.Timer
-	stopped bool
-	stopC   chan bool
-	Stack   uint
-	C       chan bool
-}
-
-func (ps *PixelStacker) resetTimer() {
-	cd := ps.GetCooldown()
-	if ps.timer == nil {
-		ps.timer = time.NewTimer(cd)
-	} else {
-		ps.timer.Reset(cd)
-	}
-	ps.stopped = false
-}
-
-func (ps *PixelStacker) stop() {
-	ps.timer.Stop()
-	ps.stopped = true
+	ctx       context.Context
+	ctxCancel context.CancelFunc
+	Stack     uint
+	C         chan bool
 }
 
 func (ps *PixelStacker) run() {
 	var max = uint(App.Conf.GetInt32("stacking.maxStacked"))
-	ps.resetTimer()
 
 	// Note(netux): <= instead of < is intentional
-	for ps.Stack <= max && !ps.stopped {
+	for ps.Stack <= max {
 		select {
-		case <-ps.timer.C:
+		case <-time.After(ps.GetCooldown()):
 			ps.Gain()
-			ps.resetTimer()
-		case <-ps.stopC:
-			ps.stop()
+		case <-ps.ctx.Done():
 			return
 		}
 	}
-	ps.stop()
 }
 
 // GetCooldown returns the user's cooldown in between receiving
@@ -60,17 +41,16 @@ func (ps *PixelStacker) GetCooldown() time.Duration {
 
 // StartTimer starts the PixelStacker
 func (ps *PixelStacker) StartTimer() {
-	if !ps.stopped {
-		ps.stopC <- true
+	if ps.ctx != nil && ps.ctx.Err() != context.Canceled {
+		ps.ctxCancel()
 	}
+	ps.ctx, ps.ctxCancel = context.WithCancel(context.Background())
 	go ps.run()
 }
 
 // StopTimer stops the PixelStacker
 func (ps *PixelStacker) StopTimer() {
-	if !ps.stopped {
-		ps.stopC <- true
-	}
+	ps.ctxCancel()
 }
 
 // Gain increases the stack and notifies that through the channel C.
@@ -92,10 +72,7 @@ func (ps *PixelStacker) Consume() {
 // MakePixelStacker creates a new, clean, PixelStacker
 func MakePixelStacker() *PixelStacker {
 	ps := PixelStacker{
-		timer:   nil,
-		stopped: true,
-		stopC:   make(chan bool, 1),
-		C:       make(chan bool, 1),
+		C: make(chan bool, 1),
 	}
 
 	return &ps

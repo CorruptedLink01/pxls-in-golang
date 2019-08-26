@@ -122,6 +122,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "initializing database err: %v\n", err)
 		return
 	}
+	defer db.Close()
 
 	palette, err := makePaletteFromConf(conf)
 	if err != nil {

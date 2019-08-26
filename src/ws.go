@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -16,6 +17,7 @@ import (
 
 type wsConn struct {
 	*websocket.Conn
+	ctx       context.Context
 	user      *User
 	sendQueue chan interface{}
 }
@@ -138,6 +140,12 @@ func upgradeSocket(w http.ResponseWriter, r *http.Request) (*wsConn, error) {
 		return nil, err
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	conn.SetCloseHandler(func(_ int, _ string) error {
+		cancel()
+		return nil
+	})
+
 	user, err := getReqUser(r)
 	if err != nil {
 		return nil, err
@@ -145,6 +153,7 @@ func upgradeSocket(w http.ResponseWriter, r *http.Request) (*wsConn, error) {
 
 	return &wsConn{
 		conn,
+		ctx,
 		user,
 		make(chan interface{}),
 	}, nil
@@ -167,8 +176,12 @@ func HandleWebsocketPath(w http.ResponseWriter, r *http.Request) {
 	Connections[ip] = conn
 	go func() {
 		for {
-			m := <-conn.sendQueue
-			conn.WriteJSON(m)
+			select {
+			case m := <-conn.sendQueue:
+				conn.WriteJSON(m)
+			case <-conn.ctx.Done():
+				return
+			}
 		}
 	}()
 
@@ -193,12 +206,16 @@ func HandleWebsocketPath(w http.ResponseWriter, r *http.Request) {
 
 func handleUserEvents(conn *wsConn) {
 	for {
-		isGain := <-conn.user.PixelStacker.C
-		cause := "consume"
-		if isGain {
-			cause = "stackGain"
+		select {
+		case isGain := <-conn.user.PixelStacker.C:
+			cause := "consume"
+			if isGain {
+				cause = "stackGain"
+			}
+			sendPixelsAvailable(conn, cause)
+		case <-conn.ctx.Done():
+			return
 		}
-		sendPixelsAvailable(conn, cause)
 	}
 }
 
