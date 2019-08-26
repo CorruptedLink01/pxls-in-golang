@@ -108,6 +108,12 @@ func (db *Database) SetUserCooldownExpiry(uid uint, ce time.Time) error {
 	return db.sql.Model(u).Update(u).Where("id = ?", uid).Error
 }
 
+// SetUserStackedPixels sets the stacked pixel count of the user with the given ID.
+func (db *Database) SetUserStackedPixels(uid uint, stack uint) error {
+	u := &DBUser{Stacked: int(stack)}
+	return db.sql.Model(u).Update(u).Where("id = ?", uid).Error
+}
+
 // Close closes the internal connection to the database.
 func (db *Database) Close() error {
 	return db.sql.Close()

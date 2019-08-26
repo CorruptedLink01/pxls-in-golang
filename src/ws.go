@@ -192,9 +192,11 @@ func HandleWebsocketPath(w http.ResponseWriter, r *http.Request) {
 		if conn.user.PixelStacker.Stack > 0 {
 			sendPixelsAvailable(conn, "connected")
 		}
-		conn.user.PixelStacker.StartTimer()
 		if conn.user.PixelStacker.Stack == 0 {
-			sendCooldown(conn, conn.user.PixelStacker.GetCooldown())
+			sendCooldown(conn, conn.user.PixelStacker.GetCooldownWithDifference())
+		}
+		if !conn.user.PixelStacker.IsTimerRunning() {
+			conn.user.PixelStacker.StartTimer()
 		}
 	}
 
@@ -213,6 +215,9 @@ func handleUserEvents(conn *wsConn) {
 				cause = "stackGain"
 			}
 			sendPixelsAvailable(conn, cause)
+			if err := App.DB.SetUserStackedPixels(conn.user.ID, conn.user.PixelStacker.Stack); err != nil {
+				fmt.Fprintf(os.Stderr, "cannot save stacked pixels for user with ID %d: %v", conn.user.ID, err)
+			}
 		case <-conn.ctx.Done():
 			return
 		}
@@ -385,11 +390,10 @@ func handlePixel(conn *wsConn, pixelMsg wsPixelReq) {
 	ps.StartTimer()
 
 	if conn.user.PixelStacker.Stack == 0 {
-		cd := ps.GetCooldown()
-		if err := App.DB.SetUserCooldownExpiry(conn.user.ID, time.Now().Add(cd)); err != nil {
+		if err := App.DB.SetUserCooldownExpiry(conn.user.ID, ps.CooldownEnd); err != nil {
 			fmt.Fprintf(os.Stderr, "cannot set cooldown expiry for user with ID %d in database: %v", conn.user.ID, err)
 		}
-		sendCooldown(conn, cd)
+		sendCooldown(conn, ps.GetCooldown())
 	}
 
 	pixelsMsg := wsPixelRes{
