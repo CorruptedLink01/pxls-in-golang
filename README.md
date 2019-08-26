@@ -38,10 +38,15 @@ With some hope (and luck), this might eventually become the live version of the 
 	- [x] handle pixel stacking
 	- [ ] other message types...
 - [ ] User roles
-- [x] Database
-	- [x] users table
-	- [x] sessions table
+- [-] Database
+	- [-] users table
+		- [x] basic information (name, login)
+		- [x] placing information (cooldown expiry, stacked pixel count)
+		- [ ] punishment information (ban, chat ban)
+	- [x] sessions table (token)
 	- [-] pixels table
+		- [x] basic information (position, color, is most recent pixel at that location)
+		- [ ] undo information (secondary id, etc.)
 - [ ] Console commands
 - [ ] Board backups
 - [ ] Logs
