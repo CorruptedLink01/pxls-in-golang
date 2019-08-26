@@ -31,8 +31,12 @@ func (db *Database) GetUserByLogin(login UserLogin) (u *DBUser, err error) {
 
 // GetUserByToken returns the user with the given session token.
 func (db *Database) GetUserByToken(token string) (u *DBUser, err error) {
-	u = new(DBUser)
-	err = db.sql.First(u, "token = ?", token).Error
+	s := new(DBSession)
+	if err = db.sql.First(s, "token = ?", token).Error; err != nil {
+		return nil, err
+	}
+
+	u, err = db.GetUserByID(s.UserID)
 	return
 }
 
