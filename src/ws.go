@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -261,6 +262,22 @@ func handleIncomingMessages(conn *wsConn) {
 				break
 			}
 			handlePixel(conn, pixelMsg)
+		case wsChatMessageType:
+			if conn.user == nil {
+				break
+			}
+
+			var chatMessageMsg wsChatMessage
+			if err := json.Unmarshal(rawMsg, &chatMessageMsg); err != nil {
+				fmt.Fprintf(os.Stderr, "websocket JSON Chat Message parsing error: %v\n", err)
+				break
+			}
+			handleChatMessage(conn, chatMessageMsg)
+		case wsChatHistoryType:
+			if conn.user == nil {
+				break
+			}
+			handleChatHistory(conn)
 		default:
 			fmt.Fprintf(os.Stderr, "unhandled websocket msgType %s: %v\n", msgType, string(rawMsg))
 		}
@@ -405,4 +422,54 @@ func handlePixel(conn *wsConn, pixelMsg wsPixelReq) {
 	for _, conn := range Connections {
 		conn.queue(pixelsMsg)
 	}
+}
+
+const wsChatMessageType = "ChatMessage"
+
+type wsChatMessage struct {
+	wsMessage
+	Message string `json:"message"`
+}
+
+func handleChatMessage(conn *wsConn, chatMessageMsg wsChatMessage) {
+	charLimit := 2048 //TODO(Link) math.Min(App.Conf.GetInt32("chat.characterLimit"), 2048)
+	if charLimit <= 0 {
+		charLimit = 2048
+	}
+
+	message := chatMessageMsg.Message
+	message = strings.ReplaceAll(message, "\r", "")
+	message = strings.ReplaceAll(message, "\n$", "")
+	if len(message) > charLimit {
+		message = message[0:charLimit]
+	}
+	filtered := ""
+
+	if conn.user == nil { //TODO(link) add console command
+		fmt.Fprintf(os.Stderr, "Console messages haven't been implemented yet\n")
+		return
+	} else {
+		if IsUserChatBanned(conn.user) {
+			return
+		}
+		if App.Conf.GetBoolean("chat.trimInput") {
+			//TODO(link)
+		}
+		//TODO(link) if App.Conf.GetBoolean("textFilter.enabled") {}
+
+		App.DB.CreateChatMessage(chatMessageMsg.Message, filtered, conn.user)
+	}
+}
+
+const wsChatHistoryType = "ChatHistory"
+
+type wsChatHistory struct {
+	wsMessage
+	History []DBChatMessage `json:"messages"`
+}
+
+func handleChatHistory(conn *wsConn) {
+	conn.queue(wsChatHistory{
+		History: App.DB.GetLastXMessages(100, false),
+	})
 }

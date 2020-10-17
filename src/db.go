@@ -114,6 +114,30 @@ func (db *Database) SetUserStackedPixels(uid uint, stack uint) error {
 	return db.sql.Model(u).Update(u).Where("id = ?", uid).Error
 }
 
+func (db *Database) CreateChatMessage(content, filtered string, author *User) (*DBChatMessage, error) {
+	chatMessage := &DBChatMessage{
+		UserID:   author.ID,
+		Content:  content,
+		Filtered: filtered,
+	}
+
+	db.sql.Create(chatMessage)
+
+	return chatMessage, nil
+}
+
+func (db *Database) GetLastXMessages(x uint, includePurged bool) (messages []ChatMessage) {
+	var dbMessages []DBChatMessage
+	db.sql.Order("sent").Limit(x).Find(&dbMessages)
+	for i := 0; i < len(dbMessages); i++ {
+		messages[i] = ChatMessage{
+			ID: dbMessages[i].ID,
+			//TODO(link)
+		}
+	}
+	return messages
+}
+
 // Close closes the internal connection to the database.
 func (db *Database) Close() error {
 	return db.sql.Close()
@@ -143,7 +167,7 @@ func MakeDatabase(driver, user, pass, uri string) (*Database, error) {
 	}
 
 	// Generate tables and migrate them when a difference with the models is detected.
-	conn.AutoMigrate(&DBPixel{}, &DBUser{}, &DBSession{})
+	conn.AutoMigrate(&DBPixel{}, &DBUser{}, &DBSession{}, &DBChatMessage{})
 
 	return &Database{
 		sql:    conn,
@@ -240,4 +264,18 @@ func (s *DBSession) BeforeUpdate() error {
 // TableName returns the name of the sessions table.
 func (*DBSession) TableName() string {
 	return "sessions"
+}
+
+type DBChatMessage struct {
+	ID       uint       `gorm:"not null; primary_key; auto_increment"`
+	UserID   uint       `gorm:"column:author; not null"`
+	Sent     *time.Time `gorm:"type:timestamp; not null; default:now(6)"`
+	Content  string     `gorm:"type:varchar(2048); not null"`
+	Filtered string     `gorm:"type:varchar(2048); not null default:''"`
+	Purged   bool       `gorm:"not null; default:false"`
+	PurgedBy uint       `gorm:"-"`
+}
+
+func (*DBChatMessage) TableName() string {
+	return "chat_messages"
 }

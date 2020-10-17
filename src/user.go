@@ -91,3 +91,7 @@ func MakeUserList() *UserList {
 		byTokenOrIP: make(map[string]*User),
 	}
 }
+
+func IsUserChatBanned(user *User) bool {
+	return user.IsPermanentlyChatBanned //TODO(link)|| user.ChatBanExpiry > time.Now()
+}
