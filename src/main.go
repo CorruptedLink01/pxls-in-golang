@@ -141,5 +141,7 @@ func main() {
 
 	go saveCanvasEvery(canvas, conf.GetTimeDurationInfiniteNotAllowed("board.saveInterval", 5*time.Second))
 
+	go StartCommands(canvas)
+
 	StartServer()
 }
